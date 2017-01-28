@@ -1,0 +1,207 @@
+@using GuessInc.Web.Telerik
+@using Newtonsoft.Json
+@using System.Web.Mvc.Ajax
+
+@model GuessInc.Web.nCommerce.Models.WarehouseStoreFrontsDetailsModel
+
+<style>
+    #slider-table {
+        width: 70%;
+    }
+    #slider-table td {
+        width: 30%;
+    }
+</style>
+
+<div class="location-storefront tabPage">
+
+    <div id="warehouseStoreFrontsDetailsContainer">
+
+        @using (Ajax.BeginForm("SaveWarehouseProratedAllocation", "Location", new AjaxOptions { HttpMethod = "POST", UpdateTargetId = "warehouseStoreFrontsDetailsContainer", LoadingElementId= "progress" }))
+        {
+            <h2>Proration between StoreFronts:</h2>
+
+            @Html.ValidationSummary()
+
+            @Html.HiddenFor(x => x.LocationCode)
+
+            <table id="slider-table">
+                <tbody>
+                    @for (int i = 0; i < Model.StoreFrontInventoryProrateFactorList.Count; i++)
+                    {
+                        <tr class="slider-row">
+                            <td>
+                                @Html.LabelFor(x => x.StoreFrontInventoryProrateFactorList[i].ProrateFactor, Model.StoreFrontInventoryProrateFactorList[i].StoreFrontSiteName)
+                                @Html.HiddenFor(x => Model.StoreFrontInventoryProrateFactorList[i].StoreFrontSiteName)
+                                @Html.HiddenFor(x => x.StoreFrontInventoryProrateFactorList[i].StoreFrontLocationId)
+                            </td>
+                            <td>
+                                <input type="range" class="prorate-slider" step="1" min="0" max="100" style="width:80%;"
+                                       value="@(Model.StoreFrontInventoryProrateFactorList[i].ProrateFactor)" />
+
+                                @*<input type="number" class="prorate-value" min="0" max="100" style="width:35px" name="StoreFrontInventoryProrateFactorList[@(i)].ProrateFactor"
+                                       value="@Model.StoreFrontInventoryProrateFactorList[i].ProrateFactor" />
+                                <span>%</span>*@
+                                <input type="text" class="prorate-value" style="width:35px"
+                                       onkeypress="return input.charCode >= 48 && input.charCode <= 57"
+                                       name="StoreFrontInventoryProrateFactorList[@(i)].ProrateFactor"
+                                       value="@Model.StoreFrontInventoryProrateFactorList[i].ProrateFactor" />
+                                <span>%</span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div class="row">
+                <input type="submit" title="Save" value="Save"/>
+            </div>
+
+            <h3 id="successMsg">@ViewBag.SuccessMessage</h3>
+
+            <div id='progress' class='loading ui-progress' style="display: none;"></div>
+        }
+
+    </div>
+
+</div>
+
+<script>
+    $(function() {
+        function rememberAllOldValues() {
+            $('#slider-table .prorate-slider').each(function() {
+                $(this).data('oldVal', $(this).val());
+            });
+        }
+
+        function init() {
+            rememberAllOldValues();
+        }
+
+        function syncCorrespondingTextBox(slider, value) {
+            var correspondingTextBox = slider.next('.prorate-value');
+            correspondingTextBox.val(value);
+        }
+
+        function syncCorrespondingSlider(textbox, value) {
+            var correspondingSlider = textbox.prev('.prorate-slider');
+            correspondingSlider.val(value);
+            correspondingSlider.trigger('change');
+        }
+
+        function getPreviousItem(currentItem) {
+            return currentItem.closest('.slider-row').prev().find('.prorate-slider');
+        }
+
+        function getNextItem(currentItem) {
+            return currentItem.closest('.slider-row').next().find('.prorate-slider');
+        }
+
+        var isValueGreaterThanZero = function(item) {
+            return item.val() > 0;
+        }
+
+        var isValueLessThanHundred = function(item) {
+            return item.val() < 100;
+        }
+
+        var isValidPercentageValue = function(value) {
+            return value >= 0 && value <= 100;
+        }
+
+        function findItemToEqualize(startingItem, currentItem, direction, condition)
+        {
+            if (direction == "forward") {
+                var nextItem = getNextItem(currentItem)
+                // if reach end then try other direction
+                if (!nextItem.is('.prorate-slider')) {
+                    return findItemToEqualize(startingItem, startingItem, "back", condition);
+                }
+                // else next item does not satisfy condition, keep searching
+                else if (condition(nextItem) == false) {
+                    return findItemToEqualize(startingItem, nextItem, direction, condition);
+                }
+                else {
+                    return nextItem;
+                }
+            }
+            else if (direction == "back") {
+                var previousItem = getPreviousItem(currentItem)
+                if (!previousItem.is('.prorate-slider')) {
+                    return findItemToEqualize(startingItem, startingItem, "forward", condition);
+                }
+                else if (condition(previousItem) == false) {
+                    return findItemToEqualize(startingItem, previousItem, direction, condition);
+                }
+                else {
+                    return previousItem;
+                }
+            }
+        }
+
+        function equalizeProrateFactorValues(changedItem, delta) {
+            if (delta == 0) {
+                return;
+            }
+  
+            var previousItem = getPreviousItem(changedItem);
+            var nextItem = getNextItem(changedItem);
+
+            var itemToEqualize;
+
+            // if current change is an increase
+            if (delta > 0) {
+                itemToEqualize = findItemToEqualize(changedItem, changedItem, "forward", isValueGreaterThanZero);
+            }
+            // if current change is a decrease
+            else if (delta < 0) {
+                itemToEqualize = findItemToEqualize(changedItem, changedItem, "back", isValueLessThanHundred);
+            }
+
+            if (itemToEqualize) {
+                var equalizeValue = parseInt(itemToEqualize.val()) + (delta * -1);
+                if (isValidPercentageValue(equalizeValue)) {
+                    itemToEqualize.val(equalizeValue);
+                    itemToEqualize.data('oldVal', equalizeValue);
+                    syncCorrespondingTextBox(itemToEqualize, equalizeValue);
+                }
+                else {
+                    var remainder = 0;
+                    if (delta > 0) {
+                        remainder = delta - itemToEqualize.val();
+                    }
+                    else if (delta < 0) {
+                        remainder = itemToEqualize.val() - delta;
+                    }
+                    itemToEqualize.val(0);
+                    itemToEqualize.data('oldVal', 0);
+                    syncCorrespondingTextBox(itemToEqualize, 0);
+
+                    // recursive call to distribute remainder value
+                    if (remainder != 0) {
+                        equalizeProrateFactorValues(itemToEqualize, remainder);
+                    }
+                }
+            }
+        }
+
+        // on slider change
+        $('#slider-table .prorate-slider').on('input change', function(e) {
+            var oldValue = $(this).data('oldVal');
+            var newValue = $(this).val();
+            syncCorrespondingTextBox($(this), newValue);
+            $(this).data('oldVal', newValue);
+
+            var delta = parseInt(newValue) - parseInt(oldValue);
+            equalizeProrateFactorValues($(this), delta);
+        });
+
+        // on text box change
+        $('#slider-table .prorate-value').on('change', function(e) {
+            var newValue = $(this).val();
+            syncCorrespondingSlider($(this), newValue);
+        });
+
+        init();
+    });
+</script>
